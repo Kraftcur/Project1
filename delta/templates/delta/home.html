@@ -1,0 +1,60 @@
+{% extends "delta/base.html" %}
+{% block content %}
+    <!-- {% for s in song %}
+        <h1>{{ s.title }}</h1>
+        <p>By {{ s.artist }}</p>
+        <p>Lyrics: {{ s.lyrics }}</p>
+    {% endfor %} -->
+    <div class="container">
+        <form method="POST" name="form1">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="name">Enter Song Title</label>
+                <input class="form-control" id="name" placeholder= "Song Title" type="text" name="song_input"><br>
+                {% if num_entries == 0 %}
+                <button method="post" class="btn btn-primary" name="action" type="submit" value="button1">Search</button>
+                {% endif %}
+            </div>
+        </form>
+        {% if num_entries > 0 %}
+            <form method="POST" name="form2">
+                {% csrf_token %}
+                <label for="artist">Enter Artist Name to Select a Song</label>
+                <input class="form-control" id="artist" placeholder= "Artist" type="text" name="artist_input"><br>
+                <button method="post" class="btn btn-primary" name="action" type="submit" value="button2">Search</button>
+            </form>
+        {% endif %}
+        
+        <table class="table table-sm table-striped">
+            <thread>
+                <tr>
+                    <th>Song</th>
+                    <th>Artist</th>
+                </tr>
+            </thread>
+            <tbody>
+                {% if num_entries > 0 %}
+                    {% for row in songs_found %}
+                        <tr>
+                        <td>{{ row.song }}</td>
+                        <td>{{ row.artist }}</td>
+                        </tr>
+                    {% endfor %}
+                {% endif %}
+                {% if num_found == 1 %}
+                    {% for row in song_row_found %}
+                    <tr>
+                    <td>{{ row.song }}</td>
+                    <td>{{ row.artist }}</td>
+                    </tr>
+                    {% endfor %}                
+                {% endif %}
+            </tbody>
+        </table>
+        {% if num_found == 1 %}
+            {% for row in song_row_found %}
+                <p class="text-md-center">{{row.lyrics}}</p>
+            {% endfor %}                
+        {% endif %}
+    </div>
+{% endblock content %}
