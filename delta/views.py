@@ -1,83 +1,127 @@
 from django.shortcuts import render
 import pandas as pd
-
-last_searched = []
+import requests
+import json
+import os
+import spotipy
+import spotipy.util as util
+from spotipy.oauth2 import SpotifyClientCredentials
+import spotipy.oauth2 as oauth2
+from sklearn import linear_model
+from sklearn import tree
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 
 def home(request):
-    global last_searched
 
-    songs_found = []
-    num_entries, num_found = 0, 0
-    song_row_found = []
+    top_hit, other_hits = [], []
+    num_hits = 0
+    genres = ""
 
     if request.method == "POST":
         if request.POST['action'] == "button1":
-            song_name = request.POST.get("song_input", None)
-            songs_found, num_entries = find_songs(song_name)
-            last_searched = songs_found
-            if num_entries == 1:
-                print(last_searched[0]['artist'])
-                song_row_found, num_found = narrow_by_artist(last_searched[0]['artist'], last_searched)
-                num_entries = 0
-        
-        if request.POST['action'] == "button2":
-            artist_name = request.POST.get("artist_input", None)
-            song_row_found, num_found = narrow_by_artist(artist_name, last_searched)
+            search_input = request.POST.get("search_input", None)
+            top_hit, other_hits, num_hits, genres = search_genius(search_input)
+
+
+        # if request.POST['action'] == "button2":
+        #     artist_name = request.POST.get("artist_input", None)
+        #     song_row_found, num_found = narrow_by_artist(artist_name, last_searched)
 
     context = {
-            'songs_found': songs_found,
-            'num_entries': num_entries,
-            'song_row_found': song_row_found,
-            'num_found': num_found
-    }    
+            'top_hit': top_hit,
+            'other_hits': other_hits,
+            'num_hits': num_hits,
+            'genres': genres
+
+    }
     return render(request, 'delta/home.html', context)
 
-"""
-Returns a tuple 
-tuple[0]: a list of dicts containing song, artist, lyrics that match songName
-tuple[1]: number of entries found
-"""
-def find_songs(songName):
-    songName = songName.strip()
-    foundRows = []
-    if len(songName) > 0:
-        data = pd.read_csv('delta/data/Lyrics1.csv')
-        data2 = pd.read_csv('delta/data/Lyrics2.csv')
-        
-        index = data['Song'].str.contains(songName, na=False, case=False)
-        
-        for i, c in enumerate(index):
-            if c == True:
-                new_row = {}
-                row = data.iloc[[i]]
-                if len(row['Song'].values[0]) == len(songName):
-                    new_row['song'] = row['Song'].values[0]
-                    new_row['artist'] = row['Band'].values[0]
-                    new_row['lyrics'] = row['Lyrics'].values[0]
-                    foundRows.append(new_row)
-                    
-        index = data2['Song'].str.contains(songName, na=False, case=False)
-        for i, c in enumerate(index):
-            if c == True:
-                new_row = {}
-                row = data2.iloc[[i]]
-                if len(row['Song'].values[0]) == len(songName):
-                    new_row['song'] = row['Song'].values[0]
-                    new_row['artist'] = row['Band'].values[0]
-                    new_row['lyrics'] = row['Lyrics'].values[0]
-                    foundRows.append(new_row)
-    return foundRows, len(foundRows)
+def get_spotify_token():
+    CLIENT_ID = os.environ["SPOTIFY_CLIENT_ID"]
+    CLIENT_SECRET = os.environ["SPOTIFY_CLIENT_SECRET"]
+
+    credentials = oauth2.SpotifyClientCredentials(
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET)
+
+    token = credentials.get_access_token()
+    spotify = spotipy.Spotify(auth=token)
+    return spotify
 
 
-def narrow_by_artist(artist_name, songs_found):
-    found = {}
-    print(songs_found)
-    for row in songs_found:
-        if row['artist'].lower() == artist_name.lower():
-            found = row
-            break
-    row_found = [found]
-    return row_found, len(row_found)
+def search_genius(search):
+    CLIENT_ID = os.environ["GENIUS_CLIENT_ACCESS_TOKEN"]
+    search = search.replace(" ", "-")
+    request_uri = '/'.join(['https://api.genius.com', 'search/'])
+    params = {'q': search}
+    token = 'Bearer {}'.format(CLIENT_ID)
+    headers = {'Authorization': token}
+
+    r = requests.get(request_uri, params=params, headers=headers)
+    data = json.loads(r.text)
+
+    other_hits = []
+
+    num_hits = len(data['response']['hits'])
+
+    if num_hits > 0:
+        top_hit = data['response']['hits'][0]
+        for hit in data['response']['hits'][1:]:
+            other_hits.append(hit)
+    genres = search_spotify(top_hit)
+    return top_hit, other_hits, num_hits, genres
+
+def search_spotify(top_hit):
+    spotify = get_spotify_token()
+    name_of_song = top_hit['result']['title']
+    track = spotify.search(name_of_song)
+
+    idofsong = track['tracks']['items'][0]['id']
+    artist = track['tracks']['items'][0]['artists'][0]['name']
+    print(artist)
+    features = spotify.audio_features([idofsong])
+    return filter_features(features)
+
+def filter_features(features):
+    dict_struct = dict.fromkeys(['energy', 'liveness', 'tempo', 'speechiness', 'acousticness', 'instrumentalness', 'danceability', 'valence'])
+    features_dict = features[0]
+    for k, v in features_dict.items():
+        if k in dict_struct:
+            dict_struct[k] = [v]
+    print(dict_struct)
+    return apply_classifier(dict_struct)
+
+def apply_classifier(dict_struct):
+    df_test = pd.DataFrame(data=dict_struct)
+    print(dict_struct)
+
+    data = pd.read_csv('delta/data/Hot100OneGenre.csv')
+    Y = data['genre']
+    X = data.drop('genre', axis=1)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.5, random_state=1)
+
+    clf = tree.DecisionTreeClassifier(max_depth=7)
+    clf = clf.fit(X_train, Y_train)
+    # clf = linear_model.LogisticRegression(C=4)
+    # clf.fit(X_train, Y_train)
+    Y_pred = clf.predict(X_test)
+    pred = clf.predict_proba(df_test)
+    print(len(pred))
+    # print(Y_pred)
+    acc = accuracy_score(Y_test, Y_pred)
+    print("ACC: ", acc)
+
+    probs = sorted(zip(clf.classes_, pred[0]), key=lambda x:x[1], reverse=True)
+    top_2 = probs[:2]
+    top_2_str = ""
+    for i in top_2:
+        i = list(i)
+        top_2_str += i[0] + ", "
+    top_2_str = top_2_str[:-2]
+    print(top_2_str)
+    return top_2_str
+
 
 
 def about(request):
