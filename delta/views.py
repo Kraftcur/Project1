@@ -61,25 +61,27 @@ def search_genius(search):
     r = requests.get(request_uri, params=params, headers=headers)
     data = json.loads(r.text)
 
-    other_hits = []
-
+    other_hits, top_hit = [], []
+    num_hits = 0
     num_hits = len(data['response']['hits'])
-
+    genres = ""
     if num_hits > 0:
         top_hit = data['response']['hits'][0]
+        artist = data['response']['hits'][0]['result']['primary_artist']['name']
         for hit in data['response']['hits'][1:]:
             other_hits.append(hit)
-    genres = search_spotify(top_hit)
+        genres = search_spotify(top_hit, artist)
     return top_hit, other_hits, num_hits, genres
 
-def search_spotify(top_hit):
+def search_spotify(top_hit, found_artist):
     spotify = get_spotify_token()
     name_of_song = top_hit['result']['title']
     track = spotify.search(name_of_song)
 
-    idofsong = track['tracks']['items'][0]['id']
-    artist = track['tracks']['items'][0]['artists'][0]['name']
-    print(artist)
+    for i in track['tracks']['items']:
+        if i['artists'][0]['name'] == found_artist:
+            idofsong = i['id']
+            artist = i['artists'][0]['name']
     features = spotify.audio_features([idofsong])
     return filter_features(features)
 
